@@ -5,18 +5,15 @@ import (
 )
 
 const (
-	IWD_SERVICE                       = "net.connman.iwd"
-	IWD_WIPHY_INTERFACE               = "net.connman.iwd.Adapter"
-	IWD_AGENT_INTERFACE               = "net.connman.iwd.Agent"
-	IWD_AGENT_MANAGER_INTERFACE       = "net.connman.iwd.AgentManager"
-	IWD_DEVICE_INTERFACE              = "net.connman.iwd.Device"
-	IWD_KNOWN_NETWORK_INTERFACE       = "net.connman.iwd.KnownNetwork"
-	IWD_NETWORK_INTERFACE             = "net.connman.iwd.Network"
-	IWD_WSC_INTERFACE                 = "net.connman.iwd.SimpleConfiguration"
-	IWD_SIGNAL_AGENT_INTERFACE        = "net.connman.iwd.SignalLevelAgent"
-	IWD_AP_INTERFACE                  = "net.connman.iwd.AccessPoint"
-	IWD_ADHOC_INTERFACE               = "net.connman.iwd.AdHoc"
-	IWD_STATION_INTERFACE             = "net.connman.iwd.Station"
+	IWD_SERVICE                 = "net.connman.iwd"
+	IWD_AGENT_INTERFACE         = "net.connman.iwd.Agent"
+	IWD_AGENT_MANAGER_INTERFACE = "net.connman.iwd.AgentManager"
+	IWD_DEVICE_INTERFACE        = "net.connman.iwd.Device"
+	IWD_WSC_INTERFACE           = "net.connman.iwd.SimpleConfiguration"
+	IWD_SIGNAL_AGENT_INTERFACE  = "net.connman.iwd.SignalLevelAgent"
+	IWD_AP_INTERFACE            = "net.connman.iwd.AccessPoint"
+	IWD_ADHOC_INTERFACE         = "net.connman.iwd.AdHoc"
+
 	IWD_P2P_INTERFACE                 = "net.connman.iwd.p2p.Device"
 	IWD_P2P_PEER_INTERFACE            = "net.connman.iwd.p2p.Peer"
 	IWD_P2P_SERVICE_MANAGER_INTERFACE = "net.connman.iwd.p2p.ServiceManager"
@@ -32,10 +29,10 @@ const (
 
 type Iwd struct {
 	conn          *dbus.Conn
-	Stations      map[dbus.ObjectPath]Station
-	KnownNetworks map[dbus.ObjectPath]KnownNetwork
-	Adapters      map[dbus.ObjectPath]Adapter
-	Networks      map[dbus.ObjectPath]Network
+	Stations      []*Station
+	KnownNetworks []*KnownNetwork
+	Adapters      []*Adapter
+	Networks      []*Network
 }
 
 func NewIwd() (*Iwd, error) {
@@ -45,10 +42,10 @@ func NewIwd() (*Iwd, error) {
 	}
 	obj := &Iwd{
 		conn:          conn,
-		Stations:      make(map[dbus.ObjectPath]Station),
-		KnownNetworks: make(map[dbus.ObjectPath]KnownNetwork),
-		Adapters:      make(map[dbus.ObjectPath]Adapter),
-		Networks:      make(map[dbus.ObjectPath]Network),
+		Stations:      []*Station{},
+		KnownNetworks: []*KnownNetwork{},
+		Adapters:      []*Adapter{},
+		Networks:      []*Network{},
 	}
 	//get all remote info
 	if err := obj.updateInfo(); err != nil {
@@ -99,18 +96,20 @@ func (obj *Iwd) updateInfo() error {
 	for path, v := range objects {
 		if s, has := v[IWD_NETWORK_INTERFACE]; has {
 			//network
-			network := Network{
+			network := &Network{
+				obj:       obj.conn.Object(IWD_NETWORK_INTERFACE, path),
 				Path:      path,
 				Name:      s["Name"].Value().(string),
 				Connected: s["Connected"].Value().(bool),
 				Type:      s["Type"].Value().(string),
 			}
-			obj.Networks[path] = network
+			obj.Networks = append(obj.Networks, network)
 		} else if _, has := v[IWD_AGENT_INTERFACE]; has {
 			//iwd
 		} else if s, has := v[IWD_WIPHY_INTERFACE]; has {
 			//phy
-			adapter := Adapter{
+			adapter := &Adapter{
+				obj:            obj.conn.Object(IWD_WIPHY_INTERFACE, path),
 				Path:           path,
 				Powered:        s["Powered"].Value().(bool),
 				Name:           s["Name"].Value().(string),
@@ -124,10 +123,11 @@ func (obj *Iwd) updateInfo() error {
 			if vendor, has := s["Vendor"]; has {
 				adapter.Vendor = vendor.Value().(string)
 			}
-			obj.Adapters[path] = adapter
+			obj.Adapters = append(obj.Adapters, adapter)
 		} else if s, has := v[IWD_STATION_INTERFACE]; has {
 			//station
-			station := Station{
+			station := &Station{
+				obj:      obj.conn.Object(IWD_SERVICE, path),
 				Path:     path,
 				State:    s["State"].Value().(string),
 				Scanning: s["Scanning"].Value().(bool),
@@ -138,10 +138,11 @@ func (obj *Iwd) updateInfo() error {
 			if network, has := s["ConnectedNetwork"]; has {
 				station.ConnectedNetworkPath = network.Value().(dbus.ObjectPath)
 			}
-			obj.Stations[path] = station
+			obj.Stations = append(obj.Stations, station)
 		} else if s, has := v[IWD_KNOWN_NETWORK_INTERFACE]; has {
 			//known_network
-			knownNetwork := KnownNetwork{
+			knownNetwork := &KnownNetwork{
+				obj:         obj.conn.Object(IWD_SERVICE, path),
 				Path:        path,
 				Name:        s["Name"].Value().(string),
 				Type:        s["Type"].Value().(string),
@@ -152,7 +153,7 @@ func (obj *Iwd) updateInfo() error {
 			if time, has := s["LastConnectedTime"]; has {
 				knownNetwork.LastConnectedTime = time.Value().(string)
 			}
-			obj.KnownNetworks[path] = knownNetwork
+			obj.KnownNetworks = append(obj.KnownNetworks, knownNetwork)
 		}
 	}
 	return nil

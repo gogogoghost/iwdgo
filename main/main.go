@@ -12,4 +12,8 @@ func main() {
 		panic(err)
 	}
 	fmt.Println(iwd.Stations)
+	err = iwd.Stations[0].Scan()
+	if err != nil {
+		panic(err)
+	}
 }

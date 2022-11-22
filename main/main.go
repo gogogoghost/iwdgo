@@ -2,39 +2,38 @@ package main
 
 import (
 	"fmt"
-	"os"
+	"time"
 
 	iwd "github.com/gogogoghost/iwdgo"
 )
 
 func main() {
-	pid := os.Getpid()
-	fmt.Printf("进程 PID: %d \n", pid)
+	// new instance
 	instance, err := iwd.NewIwd()
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(instance.Conn.Names())
+	// get station
 	station := instance.Stations[0]
-	err = station.Scan()
-	if err != nil {
+	println(station.Name())
+	// scan
+	if err := station.Scan(); err != nil {
 		panic(err)
 	}
 	fmt.Println("scanning...")
-	err = station.WaitForScan()
-	if err != nil {
-		panic(err)
-	}
+	// props auto update by signal, is not real time
+	// wait for 1 second
+	time.Sleep(time.Second * 1)
+	station.WaitForScan()
+	// get scan result
 	list, err := station.GetOrderedNetworks()
 	if err != nil {
 		panic(err)
 	}
+	// find my wifi
 	var ap *iwd.OrderedNetwork = nil
 	for _, item := range list {
-		name, err := item.GetName()
-		if err != nil {
-			panic(err)
-		}
+		name := item.Name()
 		if name == "SZZY" {
 			ap = item
 			fmt.Println("found my wifi")
@@ -44,8 +43,21 @@ func main() {
 	if ap == nil {
 		panic("not found my wifi")
 	}
-	// time.Sleep(time.Hour)
-	if err := ap.Connect("szzy123456"); err != nil {
+	// if iwd has remember this wifi.
+	kn, err := ap.KnownNetwork()
+	if err != nil {
+		panic(err)
+	}
+	if kn != nil {
+		// forget it
+		// avoid iwd using old password
+		if err := kn.Forget(); err != nil {
+			panic(err)
+		}
+		println("忘记网络")
+	}
+	if err := ap.Connect("szzy12345678"); err != nil {
+		// 此处就会验证密码
 		panic(err)
 	}
 	fmt.Println("connecting...")

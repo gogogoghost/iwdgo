@@ -8,7 +8,6 @@ const (
 	IWD_SERVICE                 = "net.connman.iwd"
 	IWD_AGENT_INTERFACE         = "net.connman.iwd.Agent"
 	IWD_AGENT_MANAGER_INTERFACE = "net.connman.iwd.AgentManager"
-	IWD_DEVICE_INTERFACE        = "net.connman.iwd.Device"
 	IWD_WSC_INTERFACE           = "net.connman.iwd.SimpleConfiguration"
 	IWD_SIGNAL_AGENT_INTERFACE  = "net.connman.iwd.SignalLevelAgent"
 	IWD_AP_INTERFACE            = "net.connman.iwd.AccessPoint"
@@ -24,6 +23,8 @@ const (
 	IWD_AGENT_MANAGER_PATH = "/net/connman/iwd"
 	IWD_TOP_LEVEL_PATH     = "/"
 
+	DBUS_PROPERTIES_INTERFACE = "org.freedesktop.DBus.Properties"
+
 	M_AGENT_PATH dbus.ObjectPath = "/site/zbyte/iwd/agent"
 )
 
@@ -35,6 +36,16 @@ type Iwd struct {
 	Networks      []*Network
 	// 临时保存密码位置
 	passphrasse map[dbus.ObjectPath]string
+}
+
+type IwdSub struct {
+	iwd   *Iwd
+	Obj   dbus.BusObject
+	Props *map[string]dbus.Variant
+}
+
+func (obj *IwdSub) Get(name string) any {
+	return (*obj.Props)[name].Value()
 }
 
 func NewIwd() (*Iwd, error) {
@@ -58,6 +69,8 @@ func NewIwd() (*Iwd, error) {
 	if err := obj.setupAgent(); err != nil {
 		return nil, err
 	}
+	// init listener
+	initChangeListener(conn)
 	return obj, nil
 }
 
@@ -81,84 +94,41 @@ func (obj *Iwd) updateInfo() error {
 	if err != nil {
 		return err
 	}
-	// test print
-	// for path, v := range objects {
-	// 	println(path)
-	// 	for interName, values := range v {
-	// 		// switch interName {
-	// 		// case IWD_STATION_INTERFACE:
-
-	// 		// }
-	// 		print(interName + "   ")
-	// 		fmt.Println(values)
-	// 	}
-	// 	println("==========")
-	// }
-	// return
 
 	for path, v := range objects {
-		if _, has := v[IWD_NETWORK_INTERFACE]; has {
+		if s, has := v[IWD_NETWORK_INTERFACE]; has {
 			//network
-			network := &Network{
-				iwd:  obj,
-				Obj:  obj.Conn.Object(IWD_NETWORK_INTERFACE, path),
-				Path: path,
-				// Name: s["Name"].Value().(string),
-				// Connected: s["Connected"].Value().(bool),
-				// Type: s["Type"].Value().(string),
+			network, err := NewNetwork(obj, path, &s)
+			if err != nil {
+				continue
 			}
 			obj.Networks = append(obj.Networks, network)
 		} else if _, has := v[IWD_AGENT_INTERFACE]; has {
-			//iwd
+			//iwd agent
 		} else if s, has := v[IWD_WIPHY_INTERFACE]; has {
 			//phy
-			adapter := &Adapter{
-				iwd:            obj,
-				Obj:            obj.Conn.Object(IWD_WIPHY_INTERFACE, path),
-				Path:           path,
-				Powered:        s["Powered"].Value().(bool),
-				Name:           s["Name"].Value().(string),
-				SupportedModes: s["SupportedModes"].Value().([]string),
-				// Model:          "",
-				// Vendor:         "",
-			}
-			if model, has := s["Model"]; has {
-				adapter.Model = model.Value().(string)
-			}
-			if vendor, has := s["Vendor"]; has {
-				adapter.Vendor = vendor.Value().(string)
+			adapter, err := NewAdapter(obj, path, &s)
+			if err != nil {
+				continue
 			}
 			obj.Adapters = append(obj.Adapters, adapter)
-		} else if _, has := v[IWD_STATION_INTERFACE]; has {
+		} else if s, has := v[IWD_STATION_INTERFACE]; has {
 			//station
-			station := &Station{
-				iwd:  obj,
-				Obj:  obj.Conn.Object(IWD_SERVICE, path),
-				Path: path,
-				// State:    s["State"].Value().(string),
-				// Scanning: s["Scanning"].Value().(bool),
-				// ConnectedNetworkPath: "",
-				Name: v[IWD_DEVICE_INTERFACE]["Name"].Value().(string),
+			//concat station & device
+			deviceMap := v[IWD_DEVICE_INTERFACE]
+			for k, v := range deviceMap {
+				s[k] = v
 			}
-			//network
-			// if network, has := s["ConnectedNetwork"]; has {
-			// 	station.ConnectedNetworkPath = network.Value().(dbus.ObjectPath)
-			// }
+			station, err := NewStation(obj, path, &s)
+			if err != nil {
+				continue
+			}
 			obj.Stations = append(obj.Stations, station)
 		} else if s, has := v[IWD_KNOWN_NETWORK_INTERFACE]; has {
 			//known_network
-			knownNetwork := &KnownNetwork{
-				iwd:         obj,
-				Obj:         obj.Conn.Object(IWD_SERVICE, path),
-				Path:        path,
-				Name:        s["Name"].Value().(string),
-				Type:        s["Type"].Value().(string),
-				Hidden:      s["Hidden"].Value().(bool),
-				AutoConnect: s["AutoConnect"].Value().(bool),
-				// LastConnectedTime: "",
-			}
-			if time, has := s["LastConnectedTime"]; has {
-				knownNetwork.LastConnectedTime = time.Value().(string)
+			knownNetwork, err := NewKnownNetwork(obj, path, &s)
+			if err != nil {
+				continue
 			}
 			obj.KnownNetworks = append(obj.KnownNetworks, knownNetwork)
 		}
@@ -171,30 +141,32 @@ func (obj *Iwd) UpdatePassphrase(path dbus.ObjectPath, passphrasse string) {
 	obj.passphrasse[path] = passphrasse
 }
 
-// =====================for remote
-func (obj *Iwd) Release() *dbus.Error {
-	println("Release")
-	return nil
-}
+// ============================for remote=============================
+//
+//	func (obj *Iwd) Release() *dbus.Error {
+//		println("Release")
+//		return nil
+//	}
 func (obj *Iwd) RequestPassphrase(path dbus.ObjectPath) (string, *dbus.Error) {
-	if val, ok := obj.passphrasse[path]; ok {
+	if val, has := obj.passphrasse[path]; has {
 		return val, nil
 	}
 	return "", dbus.NewError("Passphrase not set", nil)
 }
-func (obj *Iwd) RequestPrivateKeyPassphrase(path dbus.ObjectPath) (string, *dbus.Error) {
-	println("RequestPrivateKeyPassphrase:" + path)
-	return "", nil
-}
-func (obj *Iwd) RequestUserNameAndPassword(path dbus.ObjectPath) (string, string, *dbus.Error) {
-	println("RequestUserNameAndPassword:" + path)
-	return "", "", nil
-}
-func (obj *Iwd) RequestUserPassword(path dbus.ObjectPath, user string) (string, *dbus.Error) {
-	println("RequestUserPassword:" + string(path) + ":" + user)
-	return "", nil
-}
-func (obj *Iwd) Cancel(reason string) *dbus.Error {
-	println("Cancel:" + reason)
-	return nil
-}
+
+// func (obj *Iwd) RequestPrivateKeyPassphrase(path dbus.ObjectPath) (string, *dbus.Error) {
+// 	println("RequestPrivateKeyPassphrase:" + path)
+// 	return "", nil
+// }
+// func (obj *Iwd) RequestUserNameAndPassword(path dbus.ObjectPath) (string, string, *dbus.Error) {
+// 	println("RequestUserNameAndPassword:" + path)
+// 	return "", "", nil
+// }
+// func (obj *Iwd) RequestUserPassword(path dbus.ObjectPath, user string) (string, *dbus.Error) {
+// 	println("RequestUserPassword:" + string(path) + ":" + user)
+// 	return "", nil
+// }
+// func (obj *Iwd) Cancel(reason string) *dbus.Error {
+// 	println("Cancel:" + reason)
+// 	return nil
+// }

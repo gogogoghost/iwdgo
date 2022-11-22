@@ -9,7 +9,8 @@ const (
 )
 
 type KnownNetwork struct {
-	obj               dbus.BusObject
+	iwd               *Iwd
+	Obj               dbus.BusObject
 	Path              dbus.ObjectPath
 	Name              string
 	Type              string

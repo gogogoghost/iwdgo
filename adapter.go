@@ -9,7 +9,8 @@ const (
 )
 
 type Adapter struct {
-	obj            dbus.BusObject
+	iwd            *Iwd
+	Obj            dbus.BusObject
 	Path           dbus.ObjectPath
 	Powered        bool
 	Name           string

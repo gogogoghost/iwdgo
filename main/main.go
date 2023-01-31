@@ -52,9 +52,11 @@ func main() {
 		// forget it
 		// avoid iwd using old password
 		if err := kn.Forget(); err != nil {
-			panic(err)
+			// ignore this error
+			// sometime got a error
+			// panic(err)
 		}
-		println("忘记网络")
+		println("forget old password")
 	}
 	if err := ap.Connect("szzy12345678"); err != nil {
 		// 此处就会验证密码
